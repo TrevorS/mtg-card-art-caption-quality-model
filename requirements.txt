@@ -1,0 +1,7 @@
+datasets
+evaluate
+numpy
+pillow
+requests
+torch
+transformers
