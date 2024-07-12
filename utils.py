@@ -13,23 +13,28 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def get_dataset(dataset_path: str) -> Dataset:
+def get_dataset(dataset_path: str, filter_no_labels=False) -> Dataset:
     dataset = Dataset.from_json(dataset_path)
 
     def preprocess(example):
-        scryfall_id = example["data"]["id"]
+        if "data" in example:
+            example = example["data"]
 
-        image = example["data"]["card_art_uri"]
+        scryfall_id = example["id"]
+
+        image = example["card_art_uri"]
         image = Image.open(requests.get(image, stream=True).raw).convert("RGB")
 
-        caption = example["data"]["florence_more_detailed_caption"]
-        annotations = example["annotations"][0]["result"]
+        caption = example["florence_more_detailed_caption"]
+        annotations = example.get("annotations", [])
 
-        if len(annotations) != 2:
+        if len(annotations) == 0:
             accuracy = None
             creativity = None
 
         else:
+            annotations = annotations[0]["result"]
+
             accuracy = [
                 annotation
                 for annotation in annotations
@@ -50,9 +55,12 @@ def get_dataset(dataset_path: str) -> Dataset:
             "creativity": creativity,
         }
 
-    dataset = dataset.map(preprocess).filter(
-        lambda x: x["accuracy"] is not None and x["creativity"] is not None
-    )
+    dataset = dataset.map(preprocess)
+
+    if filter_no_labels:
+        dataset = dataset.filter(
+            lambda x: x["accuracy"] is not None and x["creativity"] is not None
+        )
 
     cols_to_drop = list(
         set(dataset.column_names) - {"id", "image", "caption", "accuracy", "creativity"}

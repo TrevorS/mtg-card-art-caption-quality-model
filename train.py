@@ -1,6 +1,6 @@
 import evaluate
-import torch
 import numpy as np
+import torch
 from transformers import (
     AutoProcessor,
     Trainer,

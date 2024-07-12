@@ -1,7 +1,8 @@
 import json
+from dataclasses import dataclass
 
 import torch
-from transformers import AutoProcessor
+from transformers import AutoProcessor, HfArgumentParser
 
 from caption_quality import CaptionQualityConfig, CaptionQualityModel
 from utils import get_dataset, get_device
@@ -76,9 +77,14 @@ def main(
         json.dump(results, f, indent=4)
 
 
+@dataclass
+class CaptionQualityCliArgs:
+    dataset_path: str
+    output_path: str
+    weights_path: str = "./mtg-card-art-caption-quality"
+
+
 if __name__ == "__main__":
-    main(
-        dataset_path="project-4-at-2024-07-09-18-44-77422fbd.json",
-        weights_path="./mtg-card-art-caption-quality",
-        output_path="caption-ranking-results.json",
-    )
+    parser = HfArgumentParser(CaptionQualityCliArgs)
+
+    main(**vars(parser.parse_args()))

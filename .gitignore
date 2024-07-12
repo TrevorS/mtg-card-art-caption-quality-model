@@ -4,3 +4,5 @@ files/
 mtg-card-art-caption-quality/
 wandb/
 .DS_Store
+*.json
+*.ipynb
