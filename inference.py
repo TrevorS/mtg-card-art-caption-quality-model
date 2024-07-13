@@ -48,25 +48,13 @@ def main(
         with torch.no_grad():
             outputs = model(**inputs)
 
-        logits = outputs.logits
-        num_classes = logits.shape[1] // 2
-
-        accuracy_logits, creativity_logits = (
-            logits[:, :num_classes],
-            logits[:, num_classes:],
-        )
-
-        accuracy_probs = torch.softmax(accuracy_logits, dim=-1)
-        creativity_probs = torch.softmax(creativity_logits, dim=-1)
-
-        accuracy = torch.argmax(accuracy_probs, dim=-1).item()
-        creativity = torch.argmax(creativity_probs, dim=-1).item()
+        logits = outputs.logits.squeeze()
+        probability = torch.sigmoid(logits).item()
 
         result = {
             "id": example["id"],
             "caption": example["caption"],
-            "accuracy": accuracy,
-            "creativity": creativity,
+            "probability": probability,
         }
 
         print(result)

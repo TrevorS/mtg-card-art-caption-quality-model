@@ -1,9 +1,12 @@
+from dataclasses import dataclass
+
 import evaluate
 import numpy as np
-import torch
 from transformers import (
     AutoProcessor,
+    HfArgumentParser,
     Trainer,
+    TrainerCallback,
     TrainingArguments,
     default_data_collator,
 )
@@ -11,94 +14,154 @@ from transformers import (
 from caption_quality import CaptionQualityConfig, CaptionQualityModel
 from utils import get_dataset, get_device
 
-accuracy_metric = evaluate.load("accuracy")
 device = get_device()
+
+accuracy_metric = evaluate.load("accuracy")
+f1_metric = evaluate.load("f1")
+precision_metric = evaluate.load("precision")
+recall_metric = evaluate.load("recall")
+roc_auc_metric = evaluate.load("roc_auc")
+
+
+@dataclass
+class CaptionQualityModelArguments:
+    clip_model_name: str = "google/siglip-so400m-patch14-384"
+    freeze_clip: bool = False
+    dropout_rate: float = 0.05
+
+
+@dataclass
+class CaptionQualityDataArguments:
+    dataset_path: str = "files/project-6-at-2024-07-13-14-32-d556e0fe.json"
+    val_size: float = 0.2
+    max_train_samples: int | None = None
+    max_val_samples: int | None = None
+
+
+@dataclass
+class CaptionQualityTrainingArguments(TrainingArguments):
+    logging_dir: str = "logs"
+    output_dir: str = "mtg-card-art-caption-quality"
+    overwrite_output_dir: bool = True
+    eval_strategy: str = "steps"
+    logging_strategy: str = "steps"
+    save_strategy: str = "steps"
+    eval_steps: int = 50
+    logging_steps: int = 10
+    save_steps: int = 50
+    metric_for_best_model: str = "roc_auc"
+    learning_rate: float = 1e-5
+    lr_scheduler_type: str = "linear"
+    warmup_ratio: float = 0.1
+    auto_find_batch_size: str = "power2"
+    num_train_epochs: int = 1
+    weight_decay: float = 0.001
+    report_to: str = "wandb"
 
 
 def compute_metrics(eval_pred) -> dict[str, float]:
-    logits, labels = eval_pred
-    num_classes = logits.shape[1] // 2
+    logits, references = eval_pred
+    predictions = (logits > 0).astype(int).flatten()
 
-    accuracy_logits, creativity_logits = (
-        logits[:, :num_classes],
-        logits[:, num_classes:],
-    )
-    accuracy_labels, creativity_labels = labels[:, 0], labels[:, 1]
+    # sigmoid to get probabilities
+    probs = 1 / (1 + np.exp(-logits.flatten()))
 
-    accuracy_preds = np.argmax(accuracy_logits, axis=-1)
-    creativity_preds = np.argmax(creativity_logits, axis=-1)
+    accuracy = accuracy_metric.compute(predictions=predictions, references=references)[
+        "accuracy"
+    ]
 
-    accuracy_correct = (accuracy_preds == accuracy_labels).mean()
-    creativity_correct = (creativity_preds == creativity_labels).mean()
+    f1 = f1_metric.compute(
+        predictions=predictions, references=references, average="binary"
+    )["f1"]
+
+    precision = precision_metric.compute(
+        predictions=predictions, references=references, average="binary"
+    )["precision"]
+
+    recall = recall_metric.compute(
+        predictions=predictions, references=references, average="binary"
+    )["recall"]
+
+    roc_auc = roc_auc_metric.compute(prediction_scores=probs, references=references)[
+        "roc_auc"
+    ]
 
     return {
-        "accuracy": accuracy_correct,
-        "creativity": creativity_correct,
-        "mean_accuracy": (accuracy_correct + creativity_correct) / 2,
+        "accuracy": accuracy,
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+        "roc_auc": roc_auc,
     }
 
 
-def main(
-    dataset_path: str,
-    val_size: float = 0.2,
-    output_dir: str = "mtg-card-art-caption-quality",
-    logs_dir: str = "logs",
-) -> None:
-    print("Creating model")
-    config = CaptionQualityConfig()
-    model = CaptionQualityModel(config)
-    model.to(device)
+class LoggingCallback(TrainerCallback):
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        _ = logs.pop("total_flos", None)
 
+        if state.is_local_process_zero:
+            print(f"Step: {state.global_step}")
+            print(logs)
+
+
+def main(
+    model_args: CaptionQualityModelArguments,
+    data_args: CaptionQualityDataArguments,
+    training_args: CaptionQualityTrainingArguments,
+) -> None:
     print("Loading dataset")
-    dataset = get_dataset(dataset_path)
+    dataset = get_dataset(data_args.dataset_path)
     print("Loaded dataset with", len(dataset), "examples")
 
-    print("Encoding dataset")
-    processor = AutoProcessor.from_pretrained(config.clip_model_name)
+    print(f"Encoding dataset using {model_args.clip_model_name} processor")
+    processor = AutoProcessor.from_pretrained(model_args.clip_model_name)
 
-    def encode(example):
+    def preprocess(examples):
         inputs = processor(
-            text=example["caption"],
-            images=example["image"],
+            text=examples["caption"],
+            images=examples["image"],
             return_tensors="pt",
             max_length=64,
             truncation=True,
             padding="max_length",
         )
 
-        return {
-            "pixel_values": inputs.pixel_values.squeeze(0).to(torch.float32),
-            "input_ids": inputs.input_ids.squeeze(0).to(torch.long),
-            "labels": torch.tensor(
-                [example["accuracy"], example["creativity"]], dtype=torch.long
-            ),
-        }
+        inputs["labels"] = examples["quality"]
 
-    dataset = dataset.map(encode)
-    dataset = dataset.train_test_split(test_size=val_size)
+        return inputs
+
+    dataset = dataset.map(
+        preprocess,
+        batched=True,
+        remove_columns=dataset.column_names,
+        desc="Preprocessing dataset",
+    )
+
+    dataset = dataset.train_test_split(test_size=data_args.val_size)
 
     dataset["validation"] = dataset["test"]
     print("Training dataset has", len(dataset["train"]), "examples")
     print("Validation dataset has", len(dataset["validation"]), "examples")
 
-    training_args = TrainingArguments(
-        output_dir=output_dir,
-        overwrite_output_dir=True,
-        eval_strategy="epoch",
-        logging_strategy="epoch",
-        save_strategy="epoch",
-        metric_for_best_model="mean_accuracy",
-        eval_steps=10,
-        logging_dir=logs_dir,
-        logging_steps=10,
-        save_steps=10,
-        learning_rate=2e-5,
-        per_device_train_batch_size=16,
-        per_device_eval_batch_size=8,
-        num_train_epochs=5,
-        weight_decay=0.01,
-        report_to="wandb",
+    if data_args.max_train_samples:
+        print(f"Limiting training dataset to {data_args.max_train_samples} samples")
+        dataset["train"] = dataset["train"].select(range(data_args.max_train_samples))
+
+    if data_args.max_val_samples:
+        print(f"Limiting validation dataset to {data_args.max_val_samples} samples")
+        dataset["validation"] = dataset["validation"].select(
+            range(data_args.max_val_samples)
+        )
+
+    print("Creating model")
+    config = CaptionQualityConfig(
+        clip_model_name=model_args.clip_model_name,
+        freeze_clip=model_args.freeze_clip,
+        dropout_rate=model_args.dropout_rate,
     )
+
+    model = CaptionQualityModel(config)
+    model.to(device)
 
     print("Creating trainer")
     trainer = Trainer(
@@ -108,25 +171,26 @@ def main(
         compute_metrics=compute_metrics,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
+        callbacks=[LoggingCallback()],
     )
-
-    print("Initial evaluation")
-    initial_metrics = trainer.evaluate()
-    print(f"Initial metrics: {initial_metrics}")
 
     print("Training model")
     trainer.train()
 
-    print("Final evaluation")
-    final_metrics = trainer.evaluate()
-    print(f"Final metrics: {final_metrics}")
-
     print("Saving model")
     trainer.save_model()
-    model.config.save_pretrained(output_dir)
+    model.config.save_pretrained(training_args.output_dir)
 
 
 if __name__ == "__main__":
-    main(
-        dataset_path="project-4-at-2024-07-09-18-44-77422fbd.json",
+    parser = HfArgumentParser(
+        (
+            CaptionQualityModelArguments,
+            CaptionQualityDataArguments,
+            CaptionQualityTrainingArguments,
+        )
     )
+
+    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+
+    main(model_args, data_args, training_args)

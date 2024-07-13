@@ -17,53 +17,38 @@ def get_dataset(dataset_path: str, filter_no_labels=False) -> Dataset:
     dataset = Dataset.from_json(dataset_path)
 
     def preprocess(example):
+        annotations = example.get("annotations", [])
+
         if "data" in example:
             example = example["data"]
 
         scryfall_id = example["id"]
+        caption = example["florence_more_detailed_caption"]
 
         image = example["card_art_uri"]
         image = Image.open(requests.get(image, stream=True).raw).convert("RGB")
 
-        caption = example["florence_more_detailed_caption"]
-        annotations = example.get("annotations", [])
-
         if len(annotations) == 0:
-            accuracy = None
-            creativity = None
+            quality = None
 
         else:
-            annotations = annotations[0]["result"]
-
-            accuracy = [
-                annotation
-                for annotation in annotations
-                if annotation["from_name"] == "visual_accuracy"
-            ][0]["value"]["rating"]
-
-            creativity = [
-                annotation
-                for annotation in annotations
-                if annotation["from_name"] == "creativity"
-            ][0]["value"]["rating"]
+            quality = annotations[0]["result"][0]["value"]["choices"][0]
+            quality = 1 if quality == "High Quality" else 0
 
         return {
             "id": scryfall_id,
             "image": image,
             "caption": caption,
-            "accuracy": accuracy,
-            "creativity": creativity,
+            "quality": quality,
         }
 
     dataset = dataset.map(preprocess)
 
     if filter_no_labels:
-        dataset = dataset.filter(
-            lambda x: x["accuracy"] is not None and x["creativity"] is not None
-        )
+        dataset = dataset.filter(lambda x: x["quality"] is not None)
 
     cols_to_drop = list(
-        set(dataset.column_names) - {"id", "image", "caption", "accuracy", "creativity"}
+        set(dataset.column_names) - {"id", "image", "caption", "quality"}
     )
 
     dataset = dataset.remove_columns(cols_to_drop)

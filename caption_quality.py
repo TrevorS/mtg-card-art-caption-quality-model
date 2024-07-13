@@ -17,11 +17,13 @@ class CaptionQualityConfig(SiglipConfig):
         self,
         clip_model_name: str = "google/siglip-so400m-patch14-384",
         freeze_clip: bool = True,
+        dropout_rate: float = 0.1,
         **kwargs,
     ) -> None:
         super(CaptionQualityConfig, self).__init__(**kwargs)
         self.clip_model_name = clip_model_name
         self.freeze_clip = freeze_clip
+        self.dropout_rate = dropout_rate
 
 
 class CaptionQualityModel(PreTrainedModel):
@@ -38,13 +40,13 @@ class CaptionQualityModel(PreTrainedModel):
             for param in self.clip_model.parameters():
                 param.requires_grad = False
 
-        num_features = (
+        hidden_size = (
             self.clip_model.config.vision_config.hidden_size
             + self.clip_model.config.text_config.hidden_size
         )
 
-        self.accuracy = nn.Linear(num_features, 5)
-        self.creativity = nn.Linear(num_features, 5)
+        self.dropout = nn.Dropout(config.dropout_rate)
+        self.classifier = nn.Linear(hidden_size, 1)
 
     def forward(
         self,
@@ -73,32 +75,26 @@ class CaptionQualityModel(PreTrainedModel):
             attention_mask=attention_mask,
             return_dict=return_dict,
         )
-        image_features = outputs.image_embeds
-        caption_features = outputs.text_embeds
+        image_features = F.normalize(outputs.image_embeds, dim=-1)
+        caption_features = F.normalize(outputs.text_embeds, dim=-1)
 
-        image_features = F.normalize(image_features, dim=-1)
-        caption_features = F.normalize(caption_features, dim=-1)
         combined_features = torch.cat((image_features, caption_features), dim=-1)
+        combined_features = self.dropout(combined_features)
 
-        accuracy_logits = self.accuracy(combined_features)
-        creativity_logits = self.creativity(combined_features)
-        combined_logits = torch.cat((accuracy_logits, creativity_logits), dim=-1)
+        logits = self.classifier(combined_features)
 
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
-
-            accuracy_loss = loss_fct(accuracy_logits, labels[:, 0])
-            creativity_loss = loss_fct(creativity_logits, labels[:, 1])
-
-            loss = (accuracy_loss + creativity_loss) / 2
+            loss_fct = nn.BCEWithLogitsLoss()
+            
+            loss = loss_fct(logits.squeeze(), labels.float())
             loss = loss.cpu()
 
         if not return_dict:
-            output = (combined_logits,) + outputs[2:]
+            output = (logits,) + outputs[2:]
             return ((loss,) + output) if loss is not None else output
 
         return SequenceClassifierOutput(
             loss=loss,
-            logits=combined_logits,
+            logits=logits,
         )
