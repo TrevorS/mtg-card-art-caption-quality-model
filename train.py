@@ -6,13 +6,15 @@ from transformers import (
     AutoProcessor,
     HfArgumentParser,
     Trainer,
-    TrainerCallback,
     TrainingArguments,
     default_data_collator,
 )
 
+import wandb
 from caption_quality import CaptionQualityConfig, CaptionQualityModel
 from utils import get_dataset, get_device
+
+wandb.require("core")
 
 device = get_device()
 
@@ -43,10 +45,10 @@ class CaptionQualityTrainingArguments(TrainingArguments):
     auto_find_batch_size: str = "power2"
     eval_steps: int = 50
     eval_strategy: str = "steps"
-    learning_rate: float = 1e-5
+    learning_rate: float = 5e-5
     logging_steps: int = 10
     metric_for_best_model: str = "roc_auc"
-    num_train_epochs: int = 1
+    num_train_epochs: int = 3
     output_dir: str = "mtg-card-art-caption-quality"
     overwrite_output_dir: bool = True
     report_to: str = "wandb"
@@ -90,15 +92,6 @@ def compute_metrics(eval_pred) -> dict[str, float]:
         "recall": recall,
         "roc_auc": roc_auc,
     }
-
-
-class LoggingCallback(TrainerCallback):
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        _ = logs.pop("total_flos", None)
-
-        if state.is_local_process_zero:
-            print(f"Step: {state.global_step}")
-            print(logs)
 
 
 def main(
@@ -168,7 +161,6 @@ def main(
         compute_metrics=compute_metrics,
         train_dataset=dataset["train"],
         eval_dataset=dataset["validation"],
-        callbacks=[LoggingCallback()],
     )
 
     print("Training model")

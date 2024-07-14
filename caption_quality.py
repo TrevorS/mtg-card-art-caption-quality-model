@@ -86,9 +86,12 @@ class CaptionQualityModel(PreTrainedModel):
         loss = None
         if labels is not None:
             loss_fct = nn.BCEWithLogitsLoss()
-            
             loss = loss_fct(logits.squeeze(), labels.float())
-            loss = loss.cpu()
+
+            if self.clip_model.device == torch.device("mps:0"):
+                loss = loss.cpu()
+            else:
+                loss = loss.to(self.clip_model.device)
 
         if not return_dict:
             output = (logits,) + outputs[2:]

@@ -6,3 +6,4 @@ wandb/
 .DS_Store
 *.json
 *.ipynb
+*.csv
