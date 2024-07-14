@@ -1,7 +1,9 @@
+accelerate
 datasets
 evaluate
 numpy
 pillow
 requests
-torch
+torch==2.3.0
 transformers
+wandb

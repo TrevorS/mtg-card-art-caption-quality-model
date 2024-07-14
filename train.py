@@ -26,7 +26,7 @@ roc_auc_metric = evaluate.load("roc_auc")
 @dataclass
 class CaptionQualityModelArguments:
     clip_model_name: str = "google/siglip-so400m-patch14-384"
-    freeze_clip: bool = False
+    freeze_clip: bool = True
     dropout_rate: float = 0.05
 
 
@@ -40,23 +40,20 @@ class CaptionQualityDataArguments:
 
 @dataclass
 class CaptionQualityTrainingArguments(TrainingArguments):
-    logging_dir: str = "logs"
+    auto_find_batch_size: str = "power2"
+    eval_steps: int = 50
+    eval_strategy: str = "steps"
+    learning_rate: float = 1e-5
+    logging_steps: int = 10
+    metric_for_best_model: str = "roc_auc"
+    num_train_epochs: int = 1
     output_dir: str = "mtg-card-art-caption-quality"
     overwrite_output_dir: bool = True
-    eval_strategy: str = "steps"
-    logging_strategy: str = "steps"
-    save_strategy: str = "steps"
-    eval_steps: int = 50
-    logging_steps: int = 10
-    save_steps: int = 50
-    metric_for_best_model: str = "roc_auc"
-    learning_rate: float = 1e-5
-    lr_scheduler_type: str = "linear"
-    warmup_ratio: float = 0.1
-    auto_find_batch_size: str = "power2"
-    num_train_epochs: int = 1
-    weight_decay: float = 0.001
     report_to: str = "wandb"
+    run_name: str = "mtg-card-art-caption-quality-run"
+    save_strategy: str = "no"
+    warmup_ratio: float = 0.1
+    weight_decay: float = 0.01
 
 
 def compute_metrics(eval_pred) -> dict[str, float]:
