@@ -34,7 +34,7 @@ class CaptionQualityModelArguments:
 
 @dataclass
 class CaptionQualityDataArguments:
-    dataset_path: str = "files/project-6-at-2024-07-13-14-32-d556e0fe.json"
+    dataset_path: str = "files/project-6-at-2024-07-15-19-33-e45248ab.json"
     val_size: float = 0.2
     max_train_samples: int | None = None
     max_val_samples: int | None = None
@@ -48,7 +48,7 @@ class CaptionQualityTrainingArguments(TrainingArguments):
     learning_rate: float = 5e-5
     logging_steps: int = 10
     metric_for_best_model: str = "roc_auc"
-    num_train_epochs: int = 3
+    num_train_epochs: int = 10
     output_dir: str = "mtg-card-art-caption-quality"
     overwrite_output_dir: bool = True
     report_to: str = "wandb"

@@ -9,7 +9,7 @@ from utils import get_dataset
 
 @dataclass
 class CaptionQualityMetricsArguments:
-    annotations_path: str = "files/project-6-at-2024-07-13-14-32-d556e0fe.json"
+    annotations_path: str = "files/project-6-at-2024-07-15-19-33-e45248ab.json"
 
 
 def main(args: CaptionQualityMetricsArguments):

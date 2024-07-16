@@ -28,7 +28,7 @@ def get_dataset(dataset_path: str, filter_no_labels=False) -> Dataset:
         image = example["card_art_uri"]
         image = Image.open(requests.get(image, stream=True).raw).convert("RGB")
 
-        if len(annotations) == 0:
+        if len(annotations) == 0 or len(annotations[0]["result"]) == 0:
             quality = None
 
         else:
